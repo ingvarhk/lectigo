@@ -234,7 +234,7 @@ func (e *GoogleEvent) ToModule() (*Module, error) {
 	}
 
 	var homework, teacher string
-	
+
 	re := regexp.MustCompile(`Lærer: \[(.*?)\]\nLektier:\n\[(.*?)\]`)
 	matches := re.FindStringSubmatch(e.Description)
 
@@ -248,7 +248,7 @@ func (e *GoogleEvent) ToModule() (*Module, error) {
 		Title:        e.Summary,
 		StartDate:    start,
 		EndDate:      end,
-		Room:         e.Location,
+		Location:     e.Location,
 		Teacher:      teacher,
 		Homework:     homework,
 		ModuleStatus: util.StatusFromColorID(e.ColorId),

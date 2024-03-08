@@ -1,22 +1,20 @@
 package lectigo
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
-	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
-	"github.com/gocolly/colly"
+	"github.com/chromedp/chromedp"
 	"github.com/mattismoel/lectigo/util"
 	"golang.org/x/exp/maps"
+	"golang.org/x/net/html"
 	"google.golang.org/api/calendar/v3"
 )
 
@@ -27,57 +25,45 @@ type LectioLoginInfo struct {
 }
 
 type Lectio struct {
-	Client    *http.Client
-	Collector *colly.Collector
+	Context   context.Context
+	Cancel    context.CancelFunc
 	LoginInfo *LectioLoginInfo
 }
 
 type Module struct {
-	Id           string    `json:"id"`        // The ID of the module
-	Title        string    `json:"title"`     // Title of the module (eg. 3a Dansk)
-	StartDate    time.Time `json:"startDate"` // The start date of the module. This includes the date as well as the time of start (eg. 09:55)
-	EndDate      time.Time `json:"endDate"`   // The end date of the module. This includes the date as well as the time of end (eg. 11:25)
-	Room         string    `json:"room"`      // The room of the module (eg. 22)
-	Teacher      string    `json:"teacher"`   // The teacher of the class
-	Homework     string    `json:"homework"`  // Homework for the module
-	ModuleStatus string    `json:"status"`    // The status of the module (eg. "Ændret" or "Aflyst")
+	Id           string    `json:"id"`          // The ID of the module
+	Title        string    `json:"title"`       // Title of the module (eg. 3a Dansk)
+	StartDate    time.Time `json:"startDate"`   // The start date of the module. This includes the date as well as the time of start (eg. 09:55)
+	EndDate      time.Time `json:"endDate"`     // The end date of the module. This includes the date as well as the time of end (eg. 11:25)
+	Location     string    `json:"location"`    // The room of the module (eg. 22)
+	Teacher      string    `json:"teacher"`     // The teacher of the class
+	Group        string    `json:"group"`       // The group assigned the class (e.g. 2a MU)
+	Homework     string    `json:"homework"`    // Homework for the module
+	Description  string    `json:"description"` // Notes and description by the teacher
+	ModuleStatus string    `json:"status"`      // The status of the module (eg. "Ændret" or "Aflyst")
 }
 
-type AuthenticityToken string
-
-// Creates a new instance of a Lectio struct. Generates a token, if not present in root directory.
 func NewLectio(loginInfo *LectioLoginInfo) (*Lectio, error) {
 	loginUrl := fmt.Sprintf("https://www.lectio.dk/lectio/%s/login.aspx", loginInfo.SchoolID)
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
+
+	ctx, cancel := chromedp.NewContext(context.Background(), chromedp.WithErrorf(log.Printf))
+
+	loginTask := chromedp.Tasks{
+		chromedp.Navigate(loginUrl),
+		chromedp.WaitVisible("#username"),
+		chromedp.SendKeys("#username", loginInfo.Username),
+		chromedp.SendKeys("#password", loginInfo.Password),
+		chromedp.Click("#m_Content_submitbtn2", chromedp.NodeVisible),
 	}
-	client := &http.Client{Jar: jar}
-	collector := colly.NewCollector(colly.AllowedDomains("lectio.dk", "www.lectio.dk"))
 
-	authToken, err := GetToken(loginUrl, client)
+	err := chromedp.Run(ctx, loginTask)
 	if err != nil {
-		return nil, err
-	}
-
-	// Attempts to log the user in with the given login information
-	err = collector.Post(loginUrl, map[string]string{
-		"m$Content$username": loginInfo.Username,
-		"m$Content$password": loginInfo.Password,
-		"__EVENTVALIDATION":  string(*authToken),
-		"__EVENTTARGET":      "m$Content$submitbtn2",
-		"__EVENTARGUMENT":    "",
-		"masterfootervalue":  "X1!ÆØÅ",
-		"LectioPostbackId":   "",
-	})
-
-	if err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
 
 	lectio := &Lectio{
-		Client:    client,
-		Collector: collector,
+		Context:   ctx,
+		Cancel:    cancel,
 		LoginInfo: loginInfo,
 	}
 	return lectio, nil
@@ -87,18 +73,20 @@ func NewLectio(loginInfo *LectioLoginInfo) (*Lectio, error) {
 func (m *Module) ToGoogleEvent() *GoogleEvent {
 	calendarColorID := ""
 	switch m.ModuleStatus {
-	case "aflyst":
+	case "Aflyst!":
 		calendarColorID = "4"
-	case "ændret":
+	case "Ændret!":
 		calendarColorID = "2"
 	}
 
 	descLayout := `
 Lærer: %s
+Noter:
+%s
 Lektier:
 %s
 	`
-	description := fmt.Sprintf(strings.TrimSpace(descLayout), m.Teacher, m.Homework)
+	description := fmt.Sprintf(strings.TrimSpace(descLayout), m.Teacher, m.Description, m.Homework)
 	return &GoogleEvent{
 		Id:          "lec" + m.Id,
 		Description: description,
@@ -110,165 +98,119 @@ Lektier:
 			DateTime: m.EndDate.Format(time.RFC3339),
 			TimeZone: "Europe/Copenhagen",
 		},
-		Location: m.Room,
+		Location: m.Location,
 		Summary:  m.Title,
 		ColorId:  calendarColorID,
 		Status:   "confirmed",
 	}
 }
 
-// Gets the Lectio schedule of a specified week number.
 func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
-	startTime := time.Now()
 	modules := make(map[string]Module)
-
-	// Handle redirects. The collector is not expected to get redirected. If it does, it checks for errors - for example the school id does not exist.
-	l.Collector.RedirectHandler = func(req *http.Request, via []*http.Request) error {
-		if strings.Contains(req.URL.String(), "fejlhandled") {
-			return errors.New("Could not get Lectio schedule. The school ID provided does not exist")
-		}
-		return nil
-	}
-
-	l.Collector.OnHTML("table.s2skema>tbody", func(h *colly.HTMLElement) {
-		var weekStart time.Time
-
-		h.ForEach("tr", func(row int, h *colly.HTMLElement) {
-			// If on day row
-			if row == 1 {
-				var err error
-				weekStartString := h.ChildText("td:nth-child(2)")
-				weekStart, err = parseDate(weekStartString)
-				if err != nil {
-					log.Fatalf("Could not parse date: %v\n", err)
-				}
-
-				h.ForEach("td", func(col int, h *colly.HTMLElement) {
-					// If sidebar column return prematurely
-					if col == 0 {
-						return
-					}
-				})
-			}
-
-			// If on module row
-			if row == 3 {
-				// Foreach column in schedule
-				h.ForEach("td", func(col int, h *colly.HTMLElement) {
-					// If sidebar column return prematurely
-					if col == 0 {
-						return
-					}
-
-					// Gets the current date of the module
-					date := weekStart.AddDate(0, 0, col-1)
-
-					// Foreach module
-					h.ForEach("a.s2skemabrik", func(i int, e *colly.HTMLElement) {
-						addInfo := e.Attr("data-additionalinfo")
-						if addInfo == "" {
-							log.Printf("could not get Lectio schedule for the week %d", week)
-						}
-
-						lines := strings.Split(addInfo, "\n")
-
-						var id, title, teacher, room, homework string
-
-						// Get ID of the module
-						idUrl, _ := url.Parse(e.Attr("href"))
-						urlParams, _ := url.ParseQuery(idUrl.RawQuery)
-						if strings.Contains(idUrl.RawQuery, "absid") {
-							id = urlParams.Get("absid")
-						}
-						if strings.Contains(idUrl.RawQuery, "aftaleid") {
-							id = urlParams.Get("aftaleid")
-							e.ForEach("div.s2skemabrikcontent > span", func(i int, e *colly.HTMLElement) {
-								title = e.Text
-							})
-
-						}
-
-						var status = "uændret"
-						var startDate time.Time
-						var duration time.Duration
-
-						if strings.Contains(addInfo, "Lektier:") {
-							_, homework, _ = strings.Cut(addInfo, "Lektier:")
-							homework = strings.TrimSpace(homework)
-							homework = strings.TrimSuffix(homework, "[...]")
-						}
-
-						for i, line := range lines {
-							if strings.Contains(line, "Hold: ") && title == "" {
-								_, title, _ = strings.Cut(line, ": ")
-								title = strings.TrimSpace(title)
-								continue
-							}
-							if strings.Contains(line, "Lærer: ") {
-								_, teacher, _ = strings.Cut(line, ": ")
-								teacher = strings.TrimSpace(teacher)
-								continue
-							}
-							if strings.Contains(line, "Lokale: ") || strings.Contains(line, "Lokaler: ") {
-								_, room, _ = strings.Cut(line, ": ")
-								room = strings.TrimSpace(room)
-								continue
-							}
-
-							if i == 0 && (strings.Contains(line, "Ændret!") || strings.Contains(line, "Aflyst!")) {
-								status = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(line), "!"))
-								continue
-							}
-
-							if strings.Contains(line, "-") && startDate.IsZero() && duration == 0 {
-								startDate, duration, _ = util.ConvertTimestamp(&date, line)
-								continue
-							}
-						}
-
-						module := Module{
-							Id:           id,
-							Title:        title,
-							StartDate:    startDate,
-							EndDate:      startDate.Add(duration),
-							Room:         room,
-							Teacher:      teacher,
-							Homework:     homework,
-							ModuleStatus: status,
-						}
-						modules[id] = module
-					})
-				})
-			}
-		})
-	})
 
 	weekString := fmt.Sprintf("%v%v", week, time.Now().Year())
 	scheduleUrl := fmt.Sprintf("https://www.lectio.dk/lectio/%s/SkemaNy.aspx?week=%v", l.LoginInfo.SchoolID, weekString)
-	err := l.Collector.Visit(scheduleUrl)
+
+	// Get schedule page by using chromedp
+	var scheduleHTML string
+
+	scheduleTask := chromedp.Tasks{
+		chromedp.WaitReady("body"),
+		chromedp.Navigate(scheduleUrl),
+		chromedp.InnerHTML("#s_m_Content_Content_SkemaNyMedNavigation_skema_skematabel", &scheduleHTML),
+	}
+	err := chromedp.Run(l.Context, scheduleTask)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Got Lectio schedule for week %v in %v\n", week, time.Since(startTime))
-	return modules, nil
-}
 
-// Parses a Lectio date of format "Onsdag (9/12)" to a time.Time struct
-func parseDate(input string) (time.Time, error) {
-	datePattern := `\((\d+)/(\d+)\)`
-	re := regexp.MustCompile(datePattern)
-
-	match := re.FindStringSubmatch(input)
-	if len(match) != 3 {
-		return time.Time{}, errors.New("Date not found in the input string")
+	doc, err := html.Parse(strings.NewReader(scheduleHTML))
+	if err != nil {
+		return nil, err
 	}
 
-	currentYear := time.Now().Year()
+	// Expressions for matching and splitting time format
+	reDateMatch := regexp.MustCompile(`(\d{1,2}\/\d{1,2}-20\d{2}\s\d{2}:\d{2}\stil\s\d{2}:\d{2})`)
+	reDateSplit := regexp.MustCompile(`\/|-|:+|\s+`)
 
-	day, _ := time.Parse("2/1", match[1]+"/"+match[2])
-	date := time.Date(currentYear, day.Month(), day.Day(), 0, 0, 0, 0, time.Local)
+	// Find all <a> elements
+	var getAllModules func(n *html.Node)
+	getAllModules = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "a" && len(n.Attr) == 4 {
 
-	return date, nil
+			var module Module
+
+			// Extract ID from URL of the module
+			params, _ := url.ParseQuery(strings.Split(n.Attr[0].Val, "?")[1])
+			module.Id = params.Get("absid")
+
+			// Get module details/elements
+			moduleElements := strings.Split(n.Attr[3].Val, "\n")
+
+			// Loop over all elements of current module
+			for i := 0; i != len(moduleElements); i++ {
+
+				if reDateMatch.Match([]byte(moduleElements[i])) {
+					// Check element for assigned time and date
+					module.StartDate, module.EndDate, err = util.ParseTimeAndDate(moduleElements[i], reDateSplit)
+
+					if err != nil {
+						fmt.Println("Failed to parse date and time")
+						return
+					}
+
+				} else if moduleElements[i] == "Ændret!" || moduleElements[i] == "Aflyst!" {
+					// Check for status on module
+					module.ModuleStatus = moduleElements[i]
+
+				} else if strings.HasPrefix(moduleElements[i], "Lærere: ") || strings.HasPrefix(moduleElements[i], "Lærer: ") {
+					// Check for assigned teachers
+					module.Teacher = strings.TrimPrefix(moduleElements[i], "Lærer: ")
+
+				} else if strings.HasPrefix(moduleElements[i], "Lokale: ") || strings.HasPrefix(moduleElements[i], "Lokaler: ") {
+					// Check for assigned location
+					module.Location = strings.TrimPrefix(moduleElements[i], "Lokale: ")
+
+				} else if strings.HasPrefix(moduleElements[i], "Hold: ") {
+					// Check for group assigned to lesson
+					module.Group = strings.TrimPrefix(moduleElements[i], "Hold: ")
+
+				} else if moduleElements[i] == "Lektier:" {
+					// Check for homework for the lesson
+					var homework string = "Lektier:"
+
+					for j := i + 1; j != len(moduleElements); j++ {
+						if !strings.HasPrefix(moduleElements[j], "Note:") {
+							homework += `\n` + moduleElements[j]
+							i = j
+						} else {
+							break
+						}
+					}
+					module.Homework = homework
+
+				} else if moduleElements[i] == "Note:" {
+					// Check for description and notes of the lesson
+					for j := i + 1; j != len(moduleElements); j++ {
+						module.Description += `\n` + moduleElements[j]
+						i = j
+					}
+
+				} else if moduleElements[i] != "" {
+					// Assign as title if no other match
+					module.Title = moduleElements[i]
+				}
+			}
+			modules[module.Id] = module
+		}
+
+		// Loop to next module until week is done
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			getAllModules(c)
+		}
+	}
+	getAllModules(doc)
+	return modules, nil
 }
 
 // Gets the Lectio schedule from the current weeks and weekCount weeks ahead.
@@ -287,33 +229,13 @@ func (l *Lectio) GetScheduleWeeks(weekCount int) (modules map[string]Module, err
 	return modules, nil
 }
 
-func GetToken(loginUrl string, client *http.Client) (*AuthenticityToken, error) {
-	response, err := client.Get(loginUrl)
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer response.Body.Close()
-
-	document, err := goquery.NewDocumentFromReader(response.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	token, _ := document.Find("input[name=__EVENTVALIDATION]").Attr("value")
-
-	authenticityToken := AuthenticityToken(token)
-	return &authenticityToken, nil
-}
-
 // Checks if two Lectio modules are equal
 func (m1 *Module) Equals(m2 *Module) bool {
 	b := m1.Id == m2.Id &&
 		m1.StartDate.Equal(m2.StartDate) &&
 		m1.EndDate.Equal(m2.EndDate) &&
 		m1.ModuleStatus == m2.ModuleStatus &&
-		m1.Room == m2.Room
+		m1.Location == m2.Location
 		// m1.Homework != m2.Homework
 
 	return b

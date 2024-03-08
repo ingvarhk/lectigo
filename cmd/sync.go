@@ -77,6 +77,7 @@ var syncCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Could not get Lectio schedule: %v\n", err)
 		}
+		l.Cancel() // End browser instance
 
 		gEvents, err := c.GetEvents(weeks)
 		if err != nil {
