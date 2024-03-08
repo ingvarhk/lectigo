@@ -79,14 +79,14 @@ func (m *Module) ToGoogleEvent() *GoogleEvent {
 		calendarColorID = "2"
 	}
 
-	descLayout := `
-Lærer: %s
-Noter:
-%s
-Lektier:
-%s
-	`
-	description := fmt.Sprintf(strings.TrimSpace(descLayout), m.Teacher, m.Description, m.Homework)
+	description := m.Teacher + "\n"
+	if m.Description != "" {
+		description += fmt.Sprintf("Noter: %s", m.Description)
+	}
+	if m.Homework != "" {
+		description += fmt.Sprintf("Lektier:\n%s", m.Homework)
+	}
+
 	return &GoogleEvent{
 		Id:          "lec" + m.Id,
 		Description: description,
@@ -165,11 +165,11 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 
 				} else if strings.HasPrefix(moduleElements[i], "Lærere: ") || strings.HasPrefix(moduleElements[i], "Lærer: ") {
 					// Check for assigned teachers
-					module.Teacher = strings.TrimPrefix(moduleElements[i], "Lærer: ")
+					module.Teacher = moduleElements[i]
 
 				} else if strings.HasPrefix(moduleElements[i], "Lokale: ") || strings.HasPrefix(moduleElements[i], "Lokaler: ") {
 					// Check for assigned location
-					module.Location = strings.TrimPrefix(moduleElements[i], "Lokale: ")
+					module.Location = moduleElements[i]
 
 				} else if strings.HasPrefix(moduleElements[i], "Hold: ") {
 					// Check for group assigned to lesson
@@ -177,29 +177,30 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 
 				} else if moduleElements[i] == "Lektier:" {
 					// Check for homework for the lesson
-					var homework string = "Lektier:"
 
 					for j := i + 1; j != len(moduleElements); j++ {
 						if !strings.HasPrefix(moduleElements[j], "Note:") {
-							homework += `\n` + moduleElements[j]
+							module.Homework += moduleElements[j] + "\n"
 							i = j
 						} else {
 							break
 						}
 					}
-					module.Homework = homework
 
 				} else if moduleElements[i] == "Note:" {
 					// Check for description and notes of the lesson
 					for j := i + 1; j != len(moduleElements); j++ {
-						module.Description += `\n` + moduleElements[j]
+						module.Description += moduleElements[j] + "\n"
 						i = j
 					}
 
 				} else if moduleElements[i] != "" {
 					// Assign as title if no other match
-					module.Title = moduleElements[i]
+					module.Title = fmt.Sprintf("%s - %s", moduleElements[i], module.Group)
 				}
+			}
+			if module.Title == "" {
+				module.Title = module.Group
 			}
 			modules[module.Id] = module
 		}
