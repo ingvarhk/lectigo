@@ -16,11 +16,11 @@ import (
 func StatusFromColorID(colorId string) string {
 	switch colorId {
 	case "4":
-		return "aflyst"
+		return "Aflyst!"
 	case "2":
-		return "ændret"
+		return "Ændret!"
 	}
-	return "uændret"
+	return ""
 }
 
 // Returns a Google Calendar color ID from a Lectio module status
@@ -29,9 +29,9 @@ func StatusFromColorID(colorId string) string {
 // Default "" - default calendar color
 func ColorIDFromStatus(status string) string {
 	switch status {
-	case "aflyst":
+	case "Aflyst!":
 		return "4"
-	case "ændret":
+	case "Ændret!":
 		return "2"
 	}
 	return ""

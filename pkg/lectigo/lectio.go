@@ -79,17 +79,9 @@ func (m *Module) ToGoogleEvent() *GoogleEvent {
 		calendarColorID = "2"
 	}
 
-	description := m.Teacher + "\n"
-	if m.Description != "" {
-		description += fmt.Sprintf("Noter: %s", m.Description)
-	}
-	if m.Homework != "" {
-		description += fmt.Sprintf("Lektier:\n%s", m.Homework)
-	}
-
 	return &GoogleEvent{
 		Id:          "lec" + m.Id,
-		Description: description,
+		Description: createEventDescription(m),
 		Start: &calendar.EventDateTime{
 			DateTime: m.StartDate.Format(time.RFC3339),
 			TimeZone: "Europe/Copenhagen",
@@ -196,12 +188,10 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 
 				} else if moduleElements[i] != "" {
 					// Assign as title if no other match
-					module.Title = fmt.Sprintf("%s - %s", moduleElements[i], module.Group)
+					module.Title = moduleElements[i] + " - "
 				}
 			}
-			if module.Title == "" {
-				module.Title = module.Group
-			}
+			module.Title += module.Group
 			modules[module.Id] = module
 		}
 
@@ -236,9 +226,8 @@ func (m1 *Module) Equals(m2 *Module) bool {
 		m1.StartDate.Equal(m2.StartDate) &&
 		m1.EndDate.Equal(m2.EndDate) &&
 		m1.ModuleStatus == m2.ModuleStatus &&
-		m1.Location == m2.Location
-		// m1.Homework != m2.Homework
-
+		m1.Location == m2.Location &&
+		createEventDescription(m1) == m2.Description
 	return b
 }
 
@@ -256,4 +245,15 @@ func ModulesToJSON(modules map[string]Module, filename string) error {
 	}
 
 	return nil
+}
+
+func createEventDescription(m *Module) string {
+	description := m.Teacher + "\n"
+	if m.Description != "" {
+		description += fmt.Sprintf("Noter: %s", m.Description)
+	}
+	if m.Homework != "" {
+		description += fmt.Sprintf("Lektier:\n%s", m.Homework)
+	}
+	return description
 }

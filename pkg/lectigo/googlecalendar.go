@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -233,24 +232,13 @@ func (e *GoogleEvent) ToModule() (*Module, error) {
 		return nil, err
 	}
 
-	var homework, teacher string
-
-	re := regexp.MustCompile(`Lærer: \[(.*?)\]\nLektier:\n\[(.*?)\]`)
-	matches := re.FindStringSubmatch(e.Description)
-
-	if len(matches) == 3 {
-		teacher = matches[1]
-		homework = matches[2]
-	}
-
 	module := &Module{
 		Id:           strings.TrimPrefix(e.Id, "lec"),
 		Title:        e.Summary,
 		StartDate:    start,
 		EndDate:      end,
 		Location:     e.Location,
-		Teacher:      teacher,
-		Homework:     homework,
+		Description:  e.Description,
 		ModuleStatus: util.StatusFromColorID(e.ColorId),
 	}
 

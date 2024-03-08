@@ -78,8 +78,9 @@ func ParseTimeAndDate(moduleElement string, re *regexp.Regexp) (time.Time, time.
 	}
 
 	// Format to time.Time
-	startDate := time.Date(dateSlice[2], time.Month(dateSlice[1]), dateSlice[0], dateSlice[3], dateSlice[4], 0, 0, time.Local)
-	endDate := time.Date(dateSlice[2], time.Month(dateSlice[1]), dateSlice[0], dateSlice[5], dateSlice[6], 0, 0, time.Local)
+	location, _ := time.LoadLocation("Europe/Copenhagen")
+	startDate := time.Date(dateSlice[2], time.Month(dateSlice[1]), dateSlice[0], dateSlice[3], dateSlice[4], 0, 0, location)
+	endDate := time.Date(dateSlice[2], time.Month(dateSlice[1]), dateSlice[0], dateSlice[5], dateSlice[6], 0, 0, location)
 
 	return startDate, endDate, nil
 }
