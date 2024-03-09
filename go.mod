@@ -3,11 +3,9 @@ module github.com/mattismoel/lectigo
 go 1.21.1
 
 require (
-	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/chromedp/chromedp v0.9.5
 	github.com/goccy/go-yaml v1.11.2
 	github.com/gocolly/colly v1.2.0
-	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.7.0
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/net v0.15.0
@@ -18,6 +16,7 @@ require (
 require (
 	cloud.google.com/go/compute v1.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
+	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/antchfx/htmlquery v1.3.0 // indirect
 	github.com/antchfx/xmlquery v1.3.17 // indirect

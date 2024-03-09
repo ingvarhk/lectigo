@@ -113,8 +113,11 @@ func (c *GoogleCalendar) UpdateCalendar(lectioModules map[string]Module, googleE
 					return err
 				}
 				needsUpdate := !lModule.Equals(googleModule)
+				if (hideCancelled && lModule.ModuleStatus == "Aflyst!" && googleEvent.Status != "cancelled") || (googleEvent.Status == "cancelled" && (!hideCancelled || lModule.ModuleStatus != "Aflyst!")) {
+					needsUpdate = true
+				}
 
-				if needsUpdate || (hideCancelled && lModule.ModuleStatus == "Aflyst!" && googleEvent.Status != "cancelled") || (!hideCancelled && googleEvent.Status == "cancelled") {
+				if needsUpdate {
 					c.Logger.Printf("Attempting to update %v\n", googleEvent.Id)
 					lectioEvent := calendar.Event(*lModule.ToGoogleEvent())
 
@@ -153,14 +156,12 @@ func (c *GoogleCalendar) UpdateCalendar(lectioModules map[string]Module, googleE
 			trimPrefix := strings.TrimPrefix(googleKey, "lec")
 
 			if _, ok := lectioModules[trimPrefix]; !ok {
-				if googleEvent.Status != "cancelled" {
-					c.Logger.Printf("Attempting to delete %v\n", googleKey)
-					err := c.Service.Events.Delete(c.ID, googleKey).Do()
-					if err != nil {
-						return err
-					}
-					deleted++
+				c.Logger.Printf("Attempting to delete %v\n", googleKey)
+				err := c.Service.Events.Delete(c.ID, googleKey).Do()
+				if err != nil {
+					return err
 				}
+				deleted++
 			}
 			return nil
 		}(googleKey, googleEvent)
