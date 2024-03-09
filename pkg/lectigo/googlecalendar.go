@@ -89,7 +89,7 @@ func (c *GoogleCalendar) GetEvents(weekCount int) (map[string]*GoogleEvent, erro
 }
 
 // Updates the Google Calendar with the input Lectio modules and Google Calendar events. The modules input should not be filtered, as the functions handles that (input all modules from Lectio and all events from Google Calendar)
-func (c *GoogleCalendar) UpdateCalendar(lectioModules map[string]Module, googleEvents map[string]*GoogleEvent) error {
+func (c *GoogleCalendar) UpdateCalendar(lectioModules map[string]Module, googleEvents map[string]*GoogleEvent, hideCancelled bool) error {
 	var inserted int // For keeping track of inserted events count after execution
 	var updated int  // For keeping track of updated events count after execution
 	var deleted int  // For keeping track of deleted events count after execution
@@ -113,11 +113,16 @@ func (c *GoogleCalendar) UpdateCalendar(lectioModules map[string]Module, googleE
 					return err
 				}
 				needsUpdate := !lModule.Equals(googleModule)
-				isCancelled := googleEvent.Status == "cancelled"
 
-				if needsUpdate || isCancelled {
+				if needsUpdate || (hideCancelled && lModule.ModuleStatus == "Aflyst!" && googleEvent.Status != "cancelled") || (!hideCancelled && googleEvent.Status == "cancelled") {
 					c.Logger.Printf("Attempting to update %v\n", googleEvent.Id)
 					lectioEvent := calendar.Event(*lModule.ToGoogleEvent())
+
+					if hideCancelled && lModule.ModuleStatus == "Aflyst!" {
+						lectioEvent.Status = "cancelled"
+					} else {
+						lectioEvent.Status = "confirmed"
+					}
 					_, err := c.Service.Events.Update(c.ID, googleEvent.Id, &lectioEvent).Do()
 					if err != nil {
 						return err
