@@ -2,10 +2,9 @@ package lectigo
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"net/url"
 	"os"
 	"regexp"
@@ -48,7 +47,7 @@ type Module struct {
 func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) {
 	loginUrl := fmt.Sprintf("https://www.lectio.dk/lectio/%s/login.aspx", loginInfo.SchoolID)
 
-	ctx, cancel := chromedp.NewContext(context.Background(), chromedp.WithErrorf(log.Printf))
+	ctx, cancel := chromedp.NewContext(context.Background())
 
 	loginTask := chromedp.Tasks{
 		chromedp.Navigate(loginUrl),
@@ -66,12 +65,19 @@ func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) 
 	abbreviations := make(map[string]string)
 
 	if decodeClasses {
-		jsonFile, err := os.Open("abbreviations.json")
+		csvFile, err := os.Open("abbreviations.csv")
 		if err != nil {
 			return nil, err
 		}
-		byteValue, _ := io.ReadAll(jsonFile)
-		json.Unmarshal(byteValue, &abbreviations)
+		r := csv.NewReader(csvFile)
+
+		records, err := r.ReadAll()
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range records {
+			abbreviations[record[0]] = record[1]
+		}
 	}
 
 	lectio := &Lectio{
