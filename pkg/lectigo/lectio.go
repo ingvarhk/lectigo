@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -28,6 +29,7 @@ type Lectio struct {
 	Context   context.Context
 	Cancel    context.CancelFunc
 	LoginInfo *LectioLoginInfo
+	DecodeMap map[string]string
 }
 
 type Module struct {
@@ -43,7 +45,7 @@ type Module struct {
 	ModuleStatus string    `json:"status"`      // The status of the module (eg. "Ændret" or "Aflyst")
 }
 
-func NewLectio(loginInfo *LectioLoginInfo) (*Lectio, error) {
+func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) {
 	loginUrl := fmt.Sprintf("https://www.lectio.dk/lectio/%s/login.aspx", loginInfo.SchoolID)
 
 	ctx, cancel := chromedp.NewContext(context.Background(), chromedp.WithErrorf(log.Printf))
@@ -61,10 +63,22 @@ func NewLectio(loginInfo *LectioLoginInfo) (*Lectio, error) {
 		log.Fatal(err)
 	}
 
+	abbreviations := make(map[string]string)
+
+	if decodeClasses {
+		jsonFile, err := os.Open("abbreviations.json")
+		if err != nil {
+			fmt.Println(err)
+		}
+		byteValue, _ := io.ReadAll(jsonFile)
+		json.Unmarshal(byteValue, &abbreviations)
+	}
+
 	lectio := &Lectio{
 		Context:   ctx,
 		Cancel:    cancel,
 		LoginInfo: loginInfo,
+		DecodeMap: abbreviations,
 	}
 	return lectio, nil
 }
@@ -165,7 +179,21 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 
 				} else if strings.HasPrefix(moduleElements[i], "Hold: ") {
 					// Check for group assigned to lesson
-					module.Group = strings.TrimPrefix(moduleElements[i], "Hold: ")
+					moduleGroup := strings.TrimPrefix(moduleElements[i], "Hold: ")
+
+					// Decode abbreviations and create title for event
+					var ok bool
+					if module.Group, ok = l.DecodeMap[moduleGroup]; !ok {
+						if module.Title != "" {
+							module.Title += " - "
+						}
+						module.Title += moduleGroup
+
+					} else if module.Title != "" {
+						module.Title = fmt.Sprintf("%s: %s", module.Group, module.Title)
+					} else {
+						module.Title = module.Group
+					}
 
 				} else if moduleElements[i] == "Lektier:" {
 					// Check for homework for the lesson
@@ -188,10 +216,9 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 
 				} else if moduleElements[i] != "" {
 					// Assign as title if no other match
-					module.Title = moduleElements[i] + " - "
+					module.Title = moduleElements[i]
 				}
 			}
-			module.Title += module.Group
 			modules[module.Id] = module
 		}
 
@@ -223,6 +250,7 @@ func (l *Lectio) GetScheduleWeeks(weekCount int) (modules map[string]Module, err
 // Checks if two Lectio modules are equal
 func (m1 *Module) Equals(m2 *Module) bool {
 	b := m1.Id == m2.Id &&
+		m1.Title == m2.Title &&
 		m1.StartDate.Equal(m2.StartDate) &&
 		m1.EndDate.Equal(m2.EndDate) &&
 		m1.ModuleStatus == m2.ModuleStatus &&

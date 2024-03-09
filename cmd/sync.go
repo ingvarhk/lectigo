@@ -37,6 +37,8 @@ var syncCmd = &cobra.Command{
 		calendarID, _ := cmd.Flags().GetString("calendarID")
 		tokenPath, _ := cmd.Flags().GetString("tokenPath")
 		weeks, _ := cmd.Flags().GetInt("weeks")
+		hideCancelled, _ := cmd.Flags().GetBool("hideCancelled")
+		decodeClass, _ := cmd.Flags().GetBool("decodeClass")
 
 		fmt.Println("Attempting to sync Lectio and Google Calendar...")
 
@@ -68,7 +70,7 @@ var syncCmd = &cobra.Command{
 			Username: username,
 			Password: password,
 			SchoolID: schoolID,
-		})
+		}, decodeClass)
 		if err != nil {
 			log.Fatalf("Could not create Lectio instance: %v\n", err)
 		}
@@ -83,7 +85,7 @@ var syncCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Could not get events from Google Calendar: %v\n", err)
 		}
-		err = c.UpdateCalendar(lModules, gEvents)
+		err = c.UpdateCalendar(lModules, gEvents, hideCancelled)
 		if err != nil {
 			log.Fatalf("Could not update Google Calendar: %v\n", err)
 		}
@@ -99,6 +101,8 @@ func init() {
 	syncCmd.Flags().IntP("weeks", "w", 2, "Amount of weeks to sync")
 	syncCmd.Flags().StringP("calendarID", "c", "primary", "Google Calendar calendar ID")
 	syncCmd.Flags().StringP("tokenPath", "t", "token.json", "The path to a Google OAuth token file")
+	syncCmd.Flags().Bool("hideCancelled", false, "Hide cancelled classes from the calendar")
+	syncCmd.Flags().BoolP("decodeClass", "d", false, "Replace abbreviated classes with their real title")
 
 	syncCmd.MarkFlagRequired("username")
 	syncCmd.MarkFlagRequired("password")
