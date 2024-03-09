@@ -60,7 +60,7 @@ func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) 
 
 	err := chromedp.Run(ctx, loginTask)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	abbreviations := make(map[string]string)
@@ -68,7 +68,7 @@ func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) 
 	if decodeClasses {
 		jsonFile, err := os.Open("abbreviations.json")
 		if err != nil {
-			fmt.Println(err)
+			return nil, err
 		}
 		byteValue, _ := io.ReadAll(jsonFile)
 		json.Unmarshal(byteValue, &abbreviations)
