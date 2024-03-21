@@ -4,3 +4,4 @@ go.sum
 schools.json
 schools.yaml
 schools.xml
+.DS_Store
