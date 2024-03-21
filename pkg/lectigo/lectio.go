@@ -2,7 +2,6 @@ package lectigo
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -16,6 +15,7 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/net/html"
 	"google.golang.org/api/calendar/v3"
+	"gopkg.in/yaml.v3"
 )
 
 type LectioLoginInfo struct {
@@ -29,6 +29,7 @@ type Lectio struct {
 	Cancel    context.CancelFunc
 	LoginInfo *LectioLoginInfo
 	DecodeMap map[string]string
+	Blacklist *[]ClassesToIgnore
 }
 
 type Module struct {
@@ -42,6 +43,12 @@ type Module struct {
 	Homework     string    `json:"homework"`    // Homework for the module
 	Description  string    `json:"description"` // Notes and description by the teacher
 	ModuleStatus string    `json:"status"`      // The status of the module (eg. "Ændret" or "Aflyst")
+}
+
+type ClassesToIgnore struct {
+	Time         string   `yaml:"time"`
+	Keywords     []string `yaml:"keywords"`
+	ExactMatches []string `yaml:"exactMatches"`
 }
 
 func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) {
@@ -65,19 +72,22 @@ func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) 
 	abbreviations := make(map[string]string)
 
 	if decodeClasses {
-		csvFile, err := os.Open("abbreviations.csv")
+		ymlFile, err := os.ReadFile("abbreviations.yml")
 		if err != nil {
 			return nil, err
 		}
-		r := csv.NewReader(csvFile)
+		yaml.Unmarshal(ymlFile, abbreviations)
+	}
 
-		records, err := r.ReadAll()
-		if err != nil {
-			return nil, err
-		}
-		for _, record := range records {
-			abbreviations[record[0]] = record[1]
-		}
+	toIgnore := &[]ClassesToIgnore{}
+	ymlFile, err := os.ReadFile("classestoignore.yml")
+	if err != nil {
+		return nil, err
+	}
+
+	err = yaml.Unmarshal(ymlFile, toIgnore)
+	if err != nil {
+		return nil, err
 	}
 
 	lectio := &Lectio{
@@ -85,6 +95,7 @@ func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) 
 		Cancel:    cancel,
 		LoginInfo: loginInfo,
 		DecodeMap: abbreviations,
+		Blacklist: toIgnore,
 	}
 	return lectio, nil
 }
@@ -125,11 +136,9 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 
 	// Get schedule page by using chromedp
 	var scheduleHTML string
-
 	scheduleTask := chromedp.Tasks{
-		chromedp.WaitReady("body"),
 		chromedp.Navigate(scheduleUrl),
-		chromedp.InnerHTML("#s_m_Content_Content_SkemaNyMedNavigation_skema_skematabel", &scheduleHTML),
+		chromedp.InnerHTML("#s_m_Content_Content_SkemaMedNavigation_skema_skematabel", &scheduleHTML),
 	}
 	err := chromedp.Run(l.Context, scheduleTask)
 	if err != nil {
@@ -151,6 +160,7 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 		if n.Type == html.ElementNode && n.Data == "a" && len(n.Attr) == 4 {
 
 			var module Module
+			var title string
 
 			// Extract ID from URL of the module
 			params, _ := url.ParseQuery(strings.Split(n.Attr[0].Val, "?")[1])
@@ -223,9 +233,12 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 				} else if moduleElements[i] != "" {
 					// Assign as title if no other match
 					module.Title = moduleElements[i]
+					title = moduleElements[i]
 				}
 			}
-			modules[module.Id] = module
+			if !l.shouldClassBeIgnored(title, module.StartDate) {
+				modules[module.Id] = module
+			}
 		}
 
 		// Loop to next module until week is done
@@ -290,4 +303,26 @@ func createEventDescription(m *Module) string {
 		description += fmt.Sprintf("Lektier:\n%s", m.Homework)
 	}
 	return description
+}
+
+// Checks if title contains blacklisted keywords after given time
+func (l *Lectio) shouldClassBeIgnored(title string, startDate time.Time) bool {
+	for _, ignorePastTime := range *l.Blacklist {
+		ignoreTime, _ := time.Parse("1504", ignorePastTime.Time)
+		moduleTime, _ := time.Parse("1504", fmt.Sprintf("%02d%02d", startDate.Hour(), startDate.Minute()))
+
+		if moduleTime.Compare(ignoreTime) >= 0 {
+			for _, keyword := range ignorePastTime.Keywords {
+				if strings.Contains(strings.ToLower(title), keyword) {
+					return true
+				}
+			}
+			for _, exactMatch := range ignorePastTime.ExactMatches {
+				if title == exactMatch {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
