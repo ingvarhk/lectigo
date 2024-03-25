@@ -1,0 +1,13 @@
+- time: '0810'
+  keywords: null
+  exactMatches:
+    - Dialogkaffe i kantinen
+    - Genbrugsmarked i salen
+- time: '1510'
+  keywords:
+    - filmklub
+    - futsal
+    - basket
+    - volley
+  exactMatches:
+    - Studiecafe i elevkantinen

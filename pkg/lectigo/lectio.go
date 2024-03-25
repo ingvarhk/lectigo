@@ -80,7 +80,7 @@ func NewLectio(loginInfo *LectioLoginInfo, decodeClasses bool) (*Lectio, error) 
 	}
 
 	toIgnore := &[]ClassesToIgnore{}
-	ymlFile, err := os.ReadFile("classestoignore.yml")
+	ymlFile, err := os.ReadFile("blacklist.yml")
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +137,7 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 	// Get schedule page by using chromedp
 	var scheduleHTML string
 	scheduleTask := chromedp.Tasks{
+		chromedp.WaitReady("body"),
 		chromedp.Navigate(scheduleUrl),
 		chromedp.InnerHTML("#s_m_Content_Content_SkemaMedNavigation_skema_skematabel", &scheduleHTML),
 	}
@@ -230,13 +231,13 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 						i = j
 					}
 
-				} else if moduleElements[i] != "" {
+				} else if moduleElements[i] != "" && !strings.HasPrefix(moduleElements[i], "Elever: ") && i < 2 {
 					// Assign as title if no other match
 					module.Title = moduleElements[i]
 					title = moduleElements[i]
 				}
 			}
-			if !l.shouldClassBeIgnored(title, module.StartDate) {
+			if !l.isClassBlacklisted(title, module.StartDate) {
 				modules[module.Id] = module
 			}
 		}
@@ -306,10 +307,10 @@ func createEventDescription(m *Module) string {
 }
 
 // Checks if title contains blacklisted keywords after given time
-func (l *Lectio) shouldClassBeIgnored(title string, startDate time.Time) bool {
+func (l *Lectio) isClassBlacklisted(title string, startDate time.Time) bool {
 	for _, ignorePastTime := range *l.Blacklist {
 		ignoreTime, _ := time.Parse("1504", ignorePastTime.Time)
-		moduleTime, _ := time.Parse("1504", fmt.Sprintf("%02d%02d", startDate.Hour(), startDate.Minute()))
+		moduleTime := time.Date(0, 1, 1, startDate.Hour(), startDate.Minute(), 0, 0, time.UTC)
 
 		if moduleTime.Compare(ignoreTime) >= 0 {
 			for _, keyword := range ignorePastTime.Keywords {
