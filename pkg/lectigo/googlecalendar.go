@@ -155,7 +155,7 @@ func (c *GoogleCalendar) UpdateCalendar(lectioModules map[string]Module, googleE
 			defer wg.Done()
 			trimPrefix := strings.TrimPrefix(googleKey, "lec")
 
-			if _, ok := lectioModules[trimPrefix]; !ok {
+			if _, ok := lectioModules[trimPrefix]; !ok && googleEvent.Status != "cancelled" {
 				c.Logger.Printf("Attempting to delete %v\n", googleKey)
 				err := c.Service.Events.Delete(c.ID, googleKey).Do()
 				if err != nil {
