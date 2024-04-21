@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 	"github.com/mattismoel/lectigo/util"
 	"golang.org/x/exp/maps"
@@ -133,15 +134,23 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 
 	weekString := fmt.Sprintf("%v%v", week, time.Now().Year())
 	scheduleUrl := fmt.Sprintf("https://www.lectio.dk/lectio/%s/SkemaNy.aspx?week=%v", l.LoginInfo.SchoolID, weekString)
+	const selector string = "#s_m_Content_Content_SkemaMedNavigation_skema_skematabel"
 
-	// Get schedule page by using chromedp
-	var scheduleHTML string
+	// Check if login was successful by navigating to schedule
+	var searchNodes []*cdp.Node
 	scheduleTask := chromedp.Tasks{
 		chromedp.WaitReady("body"),
 		chromedp.Navigate(scheduleUrl),
-		chromedp.InnerHTML("#s_m_Content_Content_SkemaMedNavigation_skema_skematabel", &scheduleHTML),
+		chromedp.Nodes(selector, &searchNodes, chromedp.AtLeast(0)),
 	}
 	err := chromedp.Run(l.Context, scheduleTask)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get HTML of schedule table by using chromedp
+	var scheduleHTML string
+	err = chromedp.Run(l.Context, chromedp.InnerHTML(selector, &scheduleHTML))
 	if err != nil {
 		return nil, err
 	}
