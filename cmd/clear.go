@@ -12,7 +12,6 @@ import (
 	"github.com/mattismoel/lectigo/util"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/calendar/v3"
 )
 
 // clearCmd represents the clear command
@@ -36,7 +35,7 @@ var clearCmd = &cobra.Command{
 			log.Fatalf("Could not read contents of credentials.json: %v\n", err)
 		}
 
-		config, err := google.ConfigFromJSON(bytes, calendar.CalendarEventsScope)
+		config, err := google.ConfigFromJSON(bytes, "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events")
 		if err != nil {
 			log.Fatalf("Could not create config from credentials.json")
 		}
