@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"regexp"
@@ -167,7 +168,7 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 	// Find all <a> elements
 	var getAllModules func(n *html.Node)
 	getAllModules = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "a" && len(n.Attr) == 4 {
+		if n.Type == html.ElementNode && n.Data == "a" && len(n.Attr) == 6 {
 
 			var module Module
 			var title string
@@ -176,8 +177,13 @@ func (l *Lectio) GetSchedule(week int) (map[string]Module, error) {
 			params, _ := url.ParseQuery(strings.Split(n.Attr[0].Val, "?")[1])
 			module.Id = params.Get("absid")
 
+			if n.Attr[4].Key != "data-tooltip" {
+				log.Fatalln("unable to find module key when scraping lectio")
+				return
+			}
+
 			// Get module details/elements
-			moduleElements := strings.Split(n.Attr[3].Val, "\n")
+			moduleElements := strings.Split(n.Attr[4].Val, "\n")
 
 			// Loop over all elements of current module
 			for i := 0; i != len(moduleElements); i++ {
@@ -272,7 +278,7 @@ func (l *Lectio) GetScheduleWeeks(weekCount int) (modules map[string]Module, err
 		}
 		maps.Copy(modules, weekModules)
 	}
-
+	fmt.Printf("MODULES: %#v\n", modules)
 	return modules, nil
 }
 
